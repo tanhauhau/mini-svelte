@@ -1,0 +1,13 @@
+{
+  "name": "build-your-own-svelte",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "license": "MIT",
+  "dependencies": {
+    "acorn": "^8.8.0",
+    "escodegen": "^2.0.0",
+    "estree-walker": "^3.0.1",
+    "periscopic": "^3.0.4"
+  }
+}
