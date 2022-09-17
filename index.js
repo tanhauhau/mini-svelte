@@ -15,7 +15,7 @@ fs.writeFileSync('./app.js', js, 'utf-8');
 function parse(content) {
   let i = 0;
   const ast = {};
-  ast.html = parseFragments(() => i < content.length);
+  ast.html = parseFragments(() => i < content.length - 1);
 
   return ast;
 
