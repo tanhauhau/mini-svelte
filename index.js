@@ -15,7 +15,7 @@ fs.writeFileSync('./app.js', js, 'utf-8');
 function parse(content) {
   let i = 0;
   const ast = {};
-  ast.html = parseFragments(() => i < content.length - 1);
+  ast.html = parseFragments(() => i < content.length);
 
   return ast;
 
@@ -120,7 +120,7 @@ function parse(content) {
   }
   function readWhileMatching(regex) {
     let startIndex = i;
-    while (regex.test(content[i])) {
+    while (i < content.length && regex.test(content[i])) {
       i++;
     }
     return content.slice(startIndex, i);
