@@ -120,7 +120,7 @@ function parse(content) {
   }
   function readWhileMatching(regex) {
     let startIndex = i;
-    while (regex.test(content[i])) {
+    while (i < content.length && regex.test(content[i])) {
       i++;
     }
     return content.slice(startIndex, i);
