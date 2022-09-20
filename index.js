@@ -64,12 +64,12 @@ function parse(content) {
   function parseAttributeList() {
     const attributes = [];
     skipWhitespace();
-    while(!match('>')) {
+    while (!match('>')) {
       attributes.push(parseAttribute());
       skipWhitespace();
     }
     return attributes;
-   }
+  }
   function parseAttribute() {
     const name = readWhileMatching(/[^=]/);
     eat('={');
@@ -146,34 +146,44 @@ function analyse(ast) {
     enter(node) {
       if (map.has(node)) currentScope = map.get(node);
       if (
-        node.type === 'UpdateExpression' &&
-        currentScope.find_owner(node.argument.name) === rootScope
+        node.type === 'UpdateExpression' ||
+        node.type === 'AssignmentExpression'
       ) {
-        result.willChange.add(node.argument.name);
+        const names = periscopic.extract_names(
+          node.type === 'UpdateExpression' ? node.argument : node.left
+        );
+        for (const name of names) {
+          if (currentScope.find_owner(name) === rootScope) {
+            result.willChange.add(name);
+          }
+        }
       }
     },
     leave(node) {
       if (map.has(node)) currentScope = currentScope.parent;
-    }
+    },
   });
 
   function traverse(fragment) {
-    switch(fragment.type) {
+    switch (fragment.type) {
       case 'Element':
-        fragment.children.forEach(child => traverse(child));
-        fragment.attributes.forEach(attribute => traverse(attribute));
+        fragment.children.forEach((child) => traverse(child));
+        fragment.attributes.forEach((attribute) => traverse(attribute));
         break;
       case 'Attribute':
         result.willUseInTemplate.add(fragment.value.name);
         break;
-      case 'Expression':
-        result.willUseInTemplate.add(fragment.expression.name);
+      case 'Expression': {
+        extract_names(fragment.expression).forEach((name) => {
+          result.willUseInTemplate.add(name);
+        });
         break;
+      }
     }
   }
-  ast.html.forEach(fragment => traverse(fragment));
+  ast.html.forEach((fragment) => traverse(fragment));
 
-  return result;    
+  return result;
 }
 function generate(ast, analysis) {
   const code = {
@@ -185,17 +195,17 @@ function generate(ast, analysis) {
 
   let counter = 1;
   function traverse(node, parent) {
-    switch(node.type) {
-      case 'Element':{
+    switch (node.type) {
+      case 'Element': {
         const variableName = `${node.name}_${counter++}`;
         code.variables.push(variableName);
         code.create.push(
           `${variableName} = document.createElement('${node.name}');`
-        )
-        node.attributes.forEach(attribute => {
+        );
+        node.attributes.forEach((attribute) => {
           traverse(attribute, variableName);
         });
-        node.children.forEach(child => {
+        node.children.forEach((child) => {
           traverse(child, variableName);
         });
         code.create.push(`${parent}.appendChild(${variableName})`);
@@ -224,17 +234,32 @@ function generate(ast, analysis) {
         }
         break;
       }
-      case 'Expression':{
+      case 'Expression': {
         const variableName = `txt_${counter++}`;
-        const expression = node.expression.name;
+        const expressionStr = escodegen.generate(node.expression);
         code.variables.push(variableName);
         code.create.push(
-          `${variableName} = document.createTextNode(${expression})`
+          `${variableName} = document.createTextNode(${expressionStr})`
         );
         code.create.push(`${parent}.appendChild(${variableName});`);
-        if (analysis.willChange.has(node.expression.name)) {
-          code.update.push(`if (changed.includes('${expression}')) {
-            ${variableName}.data = ${expression};
+        const names = extract_names(node.expression);
+        if (names.some((name) => analysis.willChange.has(name))) {
+          const changes = new Set();
+          names.forEach((name) => {
+            if (analysis.willChange.has(name)) {
+              changes.add(name);
+            }
+          });
+          let condition;
+          if (changes.size > 1) {
+            condition = `${JSON.stringify(
+              Array.from(changes)
+            )}.some(name => changed.includes(name))`;
+          } else {
+            condition = `changed.includes('${Array.from(changes)[0]}')`;
+          }
+          code.update.push(`if (${condition}) {
+            ${variableName}.data = ${expressionStr};
           }`);
         }
         break;
@@ -242,7 +267,7 @@ function generate(ast, analysis) {
     }
   }
 
-  ast.html.forEach(fragment => traverse(fragment, 'target'));
+  ast.html.forEach((fragment) => traverse(fragment, 'target'));
 
   const { rootScope, map } = analysis;
   let currentScope = rootScope;
@@ -250,33 +275,43 @@ function generate(ast, analysis) {
     enter(node) {
       if (map.has(node)) currentScope = map.get(node);
       if (
-        node.type === 'UpdateExpression' &&
-        currentScope.find_owner(node.argument.name) === rootScope &&
-        analysis.willUseInTemplate.has(node.argument.name)
+        node.type === 'UpdateExpression' ||
+        node.type === 'AssignmentExpression'
       ) {
-        this.replace({
-          type: 'SequenceExpression',
-          expressions: [
-            node,
-            acorn.parseExpressionAt(
-              `lifecycle.update(['${node.argument.name}'])`,
-              0,
-              {
-                ecmaVersion: 2022,
-              }
-            )
-          ]
-        })
-        this.skip();
+        const names = periscopic
+          .extract_names(
+            node.type === 'UpdateExpression' ? node.argument : node.left
+          )
+          .filter(
+            (name) =>
+              currentScope.find_owner(name) === rootScope &&
+              analysis.willUseInTemplate.has(name)
+          );
+        if (names.length > 0) {
+          this.replace({
+            type: 'SequenceExpression',
+            expressions: [
+              node,
+              acorn.parseExpressionAt(
+                `lifecycle.update(${JSON.stringify(names)})`,
+                0,
+                {
+                  ecmaVersion: 2022,
+                }
+              ),
+            ],
+          });
+          this.skip();
+        }
       }
     },
     leave(node) {
       if (map.has(node)) currentScope = currentScope.parent;
-    }
+    },
   });
   return `
     export default function() {
-      ${code.variables.map(v => `let ${v};`).join('\n')}
+      ${code.variables.map((v) => `let ${v};`).join('\n')}
       ${escodegen.generate(ast.script)}
       const lifecycle = {
         create(target) {
@@ -291,5 +326,18 @@ function generate(ast, analysis) {
       };
       return lifecycle;
     }
-  `
+  `;
+}
+
+function extract_names(jsNode, result = []) {
+  switch (jsNode.type) {
+    case 'Identifier':
+      result.push(jsNode.name);
+      break;
+    case 'BinaryExpression':
+      extract_names(jsNode.left, result);
+      extract_names(jsNode.right, result);
+      break;
+  }
+  return result;
 }
