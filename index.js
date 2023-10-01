@@ -5,16 +5,18 @@ import * as estreewalker from 'estree-walker';
 import * as escodegen from 'escodegen';
 
 // the basic structure
-const compileTarget = 'ssr';
 const content = fs.readFileSync('./app.svelte', 'utf-8');
-const ast = parse(content);
-const analysis = analyse(ast);
-const js =
-  compileTarget === 'ssr'
+
+fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
+fs.writeFileSync('./ssr.js', compile(content, 'ssr'), 'utf-8');
+
+function compile(content, compileTarget) {
+  const ast = parse(content);
+  const analysis = analyse(ast);
+  return compileTarget === 'ssr'
     ? generateSSR(ast, analysis)
     : generate(ast, analysis);
-
-fs.writeFileSync('./ssr.js', js, 'utf-8');
+}
 
 function parse(content) {
   let i = 0;
@@ -232,21 +234,35 @@ function generate(ast, analysis) {
   };
 
   let counter = 1;
+  let hydration_index = 0;
+  let hydration_parent = 'target';
   function traverse(node, parent) {
     switch (node.type) {
       case 'Element': {
         const variableName = `${node.name}_${counter++}`;
         code.variables.push(variableName);
         code.create.push(
-          `${variableName} = document.createElement('${node.name}');`
+          `${variableName} = should_hydrate ? ${hydration_parent}.childNodes[${hydration_index++}] : document.createElement('${
+            node.name
+          }');`
         );
         node.attributes.forEach((attribute) => {
           traverse(attribute, variableName);
         });
+
+        const current_hydration_parent = hydration_parent;
+        const current_hydration_index = hydration_index;
+        hydration_parent = variableName;
+        hydration_index = 0;
         node.children.forEach((child) => {
           traverse(child, variableName);
         });
-        code.create.push(`${parent}.appendChild(${variableName})`);
+        hydration_parent = current_hydration_parent;
+        hydration_index = current_hydration_index;
+
+        code.create.push(
+          `if (!should_hydrate) ${parent}.appendChild(${variableName})`
+        );
         code.destroy.push(`${parent}.removeChild(${variableName})`);
         break;
       }
@@ -254,9 +270,14 @@ function generate(ast, analysis) {
         const variableName = `txt_${counter++}`;
         code.variables.push(variableName);
         code.create.push(
-          `${variableName} = document.createTextNode('${node.value}')`
+          `${variableName} = should_hydrate ? ${hydration_parent}.childNodes[${hydration_index++}] : document.createTextNode('${
+            node.value
+          }')`
         );
-        code.create.push(`${parent}.appendChild(${variableName})`);
+        hydration_index++;
+        code.create.push(
+          `if (!should_hydrate) ${parent}.appendChild(${variableName})`
+        );
         break;
       }
       case 'Attribute': {
@@ -277,9 +298,12 @@ function generate(ast, analysis) {
         const expressionStr = escodegen.generate(node.expression);
         code.variables.push(variableName);
         code.create.push(
-          `${variableName} = document.createTextNode(${expressionStr})`
+          `${variableName} = should_hydrate ? ${hydration_parent}.childNodes[${hydration_index++}] : document.createTextNode(${expressionStr})`
         );
-        code.create.push(`${parent}.appendChild(${variableName});`);
+        hydration_index++;
+        code.create.push(
+          `if (!should_hydrate) ${parent}.appendChild(${variableName});`
+        );
         const names = extract_names(node.expression);
         if (names.some((name) => analysis.willChange.has(name))) {
           const changes = new Set();
@@ -407,6 +431,7 @@ function generate(ast, analysis) {
 
       var lifecycle = {
         create(target) {
+          const should_hydrate = target.childNodes.length > 0;
           ${code.create.join('\n')}
         },
         update(changed) {
@@ -457,6 +482,7 @@ function generateSSR(ast, analysis) {
       }
       case 'Text': {
         addString(node.value);
+        addString('<!---->');
         break;
       }
       case 'Attribute': {
@@ -464,6 +490,7 @@ function generateSSR(ast, analysis) {
       }
       case 'Expression': {
         addExpressions(node.expression);
+        addString('<!---->');
         break;
       }
     }
