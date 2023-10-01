@@ -5,12 +5,16 @@ import * as estreewalker from 'estree-walker';
 import * as escodegen from 'escodegen';
 
 // the basic structure
+const compileTarget = 'ssr';
 const content = fs.readFileSync('./app.svelte', 'utf-8');
 const ast = parse(content);
 const analysis = analyse(ast);
-const js = generate(ast, analysis);
+const js =
+  compileTarget === 'ssr'
+    ? generateSSR(ast, analysis)
+    : generate(ast, analysis);
 
-fs.writeFileSync('./app.js', js, 'utf-8');
+fs.writeFileSync('./ssr.js', js, 'utf-8');
 
 function parse(content) {
   let i = 0;
@@ -216,7 +220,6 @@ function analyse(ast) {
   }
   ast.html.forEach((fragment) => traverse(fragment));
 
-  console.log(result);
   return result;
 }
 function generate(ast, analysis) {
@@ -414,6 +417,108 @@ function generate(ast, analysis) {
         },
       };
       return lifecycle;
+    }
+  `;
+}
+
+function generateSSR(ast, analysis) {
+  const code = {
+    variables: [],
+    reactiveDeclarations: [],
+    template: {
+      expressions: [],
+      quasis: [],
+    },
+  };
+
+  let templateString = '';
+  function addString(str) {
+    templateString += str;
+  }
+  function addExpressions(expression) {
+    code.template.quasis.push(templateString);
+    templateString = '';
+    code.template.expressions.push(expression);
+  }
+
+  function traverse(node) {
+    switch (node.type) {
+      case 'Element': {
+        addString(`<${node.name}`);
+        node.attributes.forEach((attribute) => {
+          traverse(attribute);
+        });
+        addString('>');
+        node.children.forEach((child) => {
+          traverse(child);
+        });
+        addString(`</${node.name}>`);
+        break;
+      }
+      case 'Text': {
+        addString(node.value);
+        break;
+      }
+      case 'Attribute': {
+        break;
+      }
+      case 'Expression': {
+        addExpressions(node.expression);
+        break;
+      }
+    }
+  }
+
+  ast.html.forEach((fragment) => traverse(fragment));
+
+  code.template.quasis.push(templateString);
+
+  // [1,2,3].sort((a, b) => a - b)
+  // if (a > b) a-b > 1
+  // if (b > a) a-b > -1
+  analysis.reactiveDeclarations.sort((rd1, rd2) => {
+    // rd2 depends on what rd1 changes
+    if (rd1.assignees.some((assignee) => rd2.dependencies.includes(assignee))) {
+      // rd2 should come after rd1
+      return -1;
+    }
+
+    // rd1 depends on what rd2 changes
+    if (rd2.assignees.some((assignee) => rd1.dependencies.includes(assignee))) {
+      // rd1 should come after rd2
+      return 1;
+    }
+
+    // based on original order
+    return rd1.index - rd2.index;
+  });
+
+  analysis.reactiveDeclarations.forEach(
+    ({ node, index, assignees, dependencies }) => {
+      code.reactiveDeclarations.push(escodegen.generate(node));
+      assignees.forEach((assignee) => code.variables.push(assignee));
+    }
+  );
+
+  const templateLiteral = {
+    type: 'TemplateLiteral',
+    expressions: code.template.expressions,
+    quasis: code.template.quasis.map((str) => ({
+      type: 'TemplateElement',
+      value: {
+        raw: str,
+        cooked: str,
+      },
+    })),
+  };
+
+  return `
+    export default function() {
+      ${code.variables.map((v) => `let ${v};`).join('\n')}
+      ${escodegen.generate(ast.script)}
+      ${code.reactiveDeclarations.join('\n')}
+
+      return ${escodegen.generate(templateLiteral)};
     }
   `;
 }
