@@ -12,3 +12,4 @@ Here are the series of follow up videos, and the source code for them in respect
 |-------|--------|
 | [Build your own Svelte](https://youtu.be/mwvyKGw2CzU) | [the-original](https://github.com/tanhauhau/mini-svelte/tree/the-original) |
 | [Making it complete: support more expressions](https://youtu.be/5zR1F7NiLUU) | [follow-up-1](https://github.com/tanhauhau/mini-svelte/tree/follow-up-1) |
+| [Adding Reactive Declarations into our mini Svelte](https://youtu.be/dTPW0zwibHc) | [reactive-declaration-2](https://github.com/tanhauhau/mini-svelte/tree/reactive-declaration-2) |
