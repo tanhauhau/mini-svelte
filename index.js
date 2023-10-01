@@ -4,11 +4,18 @@ import * as periscopic from 'periscopic';
 import * as estreewalker from 'estree-walker';
 import * as escodegen from 'escodegen';
 
-// the basic structure
-const content = fs.readFileSync('./app.svelte', 'utf-8');
+export function buildAppJs() {
+  // the basic structure
+  const content = fs.readFileSync('./app.svelte', 'utf-8');
 
-fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
-fs.writeFileSync('./ssr.js', compile(content, 'ssr'), 'utf-8');
+  fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
+}
+
+export function buildAppAndSsr() {
+  const content = fs.readFileSync('./app.svelte', 'utf-8');
+  fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
+  fs.writeFileSync('./ssr.js', compile(content, 'ssr'), 'utf-8');
+}
 
 function compile(content, compileTarget) {
   const ast = parse(content);
@@ -334,7 +341,7 @@ function generate(ast, analysis) {
   const { rootScope, map } = analysis;
   let currentScope = rootScope;
   estreewalker.walk(ast.script, {
-    enter(node) {
+    enter(node, parent) {
       if (map.has(node)) currentScope = map.get(node);
       if (
         node.type === 'UpdateExpression' ||
@@ -358,6 +365,26 @@ function generate(ast, analysis) {
                 ecmaVersion: 2022,
               }),
             ],
+          });
+          this.skip();
+        }
+      }
+      if (node.type === 'VariableDeclarator' && parent.kind !== 'const') {
+        const name = node.id.name;
+        if (currentScope.find_owner(name) === rootScope) {
+          this.replace({
+            type: 'VariableDeclarator',
+            id: node.id,
+            init: {
+              type: 'LogicalExpression',
+              operator: '??',
+              left: acorn.parseExpressionAt(
+                `restored_state?.${node.id.name}`,
+                0,
+                { ecmaVersion: 2022 }
+              ),
+              right: node.init,
+            },
           });
           this.skip();
         }
@@ -403,7 +430,7 @@ function generate(ast, analysis) {
   );
 
   return `
-    export default function() {
+    export default function({ restored_state } = {}) {
       ${code.variables.map((v) => `let ${v};`).join('\n')}
 
       let collectChanges = [];
@@ -430,16 +457,18 @@ function generate(ast, analysis) {
       }
 
       var lifecycle = {
-        create(target) {
-          const should_hydrate = target.childNodes.length > 0;
+        create(target, should_hydrate = target.childNodes.length > 0) {
           ${code.create.join('\n')}
         },
         update(changed) {
           ${code.update.join('\n')}
         },
-        destroy() {
+        destroy(target) {
           ${code.destroy.join('\n')}
         },
+        capture_state() {
+          return { ${Array.from(analysis.variables).join(',')} };
+        }
       };
       return lifecycle;
     }

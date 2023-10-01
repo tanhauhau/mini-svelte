@@ -1,4 +1,4 @@
-export default function () {
+export default function ({ restored_state } = {}) {
   let button_1;
   let txt_2;
   let div_3;
@@ -35,8 +35,8 @@ export default function () {
     updateCalled = false;
   }
 
-  let counter = 5;
-  let foo = 5;
+  let counter = restored_state?.counter ?? 5;
+  let foo = restored_state?.foo ?? 5;
   const increment = () => (counter++, update(['counter']));
   const decrement = () => (counter--, update(['counter']));
   const incrementFoo = () => (foo++, update(['foo']));
@@ -61,8 +61,7 @@ export default function () {
   }
 
   var lifecycle = {
-    create(target) {
-      const should_hydrate = target.childNodes.length > 0;
+    create(target, should_hydrate = target.childNodes.length > 0) {
       button_1 = should_hydrate
         ? target.childNodes[0]
         : document.createElement('button');
@@ -152,7 +151,7 @@ export default function () {
         txt_13.data = foo;
       }
     },
-    destroy() {
+    destroy(target) {
       button_1.removeEventListener('click', decrement);
       target.removeChild(button_1);
       target.removeChild(div_3);
@@ -162,6 +161,9 @@ export default function () {
       target.removeChild(button_14);
       button_16.removeEventListener('click', incrementFoo);
       target.removeChild(button_16);
+    },
+    capture_state() {
+      return { counter, foo, increment, decrement, incrementFoo };
     },
   };
   return lifecycle;

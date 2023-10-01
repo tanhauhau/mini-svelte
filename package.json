@@ -8,6 +8,7 @@
     "acorn": "^8.8.0",
     "escodegen": "^2.0.0",
     "estree-walker": "^3.0.1",
-    "periscopic": "^3.0.4"
+    "periscopic": "^3.0.4",
+    "ws": "^8.14.2"
   }
 }
