@@ -11,7 +11,9 @@
   $: bar = foo + 5;
 
 </script>
-
+<div>
+  <img>
+</div>
 <button on:click={decrement}>Decrement</button>
 <div>{counter} * 2 = {double}</div>
 <div>{double} * 2 = {quadruple}</div>
