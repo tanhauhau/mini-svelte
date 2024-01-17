@@ -1,26 +1,26 @@
-import * as fs from 'fs';
-import * as acorn from 'acorn';
-import * as periscopic from 'periscopic';
-import * as estreewalker from 'estree-walker';
-import * as escodegen from 'escodegen';
+import * as fs from "fs";
+import * as acorn from "acorn";
+import * as periscopic from "periscopic";
+import * as estreewalker from "estree-walker";
+import * as escodegen from "escodegen";
 
 export function buildAppJs() {
   // the basic structure
-  const content = fs.readFileSync('./app.svelte', 'utf-8');
+  const content = fs.readFileSync("./app.svelte", "utf-8");
 
-  fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
+  fs.writeFileSync("./app.js", compile(content, "dom"), "utf-8");
 }
 
 export function buildAppAndSsr() {
-  const content = fs.readFileSync('./app.svelte', 'utf-8');
-  fs.writeFileSync('./app.js', compile(content, 'dom'), 'utf-8');
-  fs.writeFileSync('./ssr.js', compile(content, 'ssr'), 'utf-8');
+  const content = fs.readFileSync("./app.svelte", "utf-8");
+  fs.writeFileSync("./app.js", compile(content, "dom"), "utf-8");
+  fs.writeFileSync("./ssr.js", compile(content, "ssr"), "utf-8");
 }
 
 function compile(content, compileTarget) {
   const ast = parse(content);
   const analysis = analyse(ast);
-  return compileTarget === 'ssr'
+  return compileTarget === "ssr"
     ? generateSSR(ast, analysis)
     : generate(ast, analysis);
 }
@@ -46,38 +46,44 @@ function parse(content) {
     return parseScript() ?? parseElement() ?? parseExpression() ?? parseText();
   }
   function parseScript() {
-    if (match('<script>')) {
-      eat('<script>');
+    if (match("<script>")) {
+      eat("<script>");
       const startIndex = i;
-      const endIndex = content.indexOf('</script>', i);
+      const endIndex = content.indexOf("</script>", i);
       const code = content.slice(startIndex, endIndex);
       ast.script = acorn.parse(code, { ecmaVersion: 2022 });
       i = endIndex;
-      eat('</script>');
+      eat("</script>");
     }
   }
   function parseElement() {
-    if (match('<')) {
-      eat('<');
+    if (match("<")) {
+      eat("<");
       const tagName = readWhileMatching(/[a-z]/);
       const attributes = parseAttributeList();
-      eat('>');
+      eat(">");
       const endTag = `</${tagName}>`;
 
       const element = {
-        type: 'Element',
+        type: "Element",
         name: tagName,
         attributes,
-        children: parseFragments(() => !match(endTag)),
+        children: parseFragments(() => {
+          if (!match(endTag) && !isSelfClosingTag(tagName)) {
+            return true;
+          }
+        }),
       };
-      eat(endTag);
+      if (!isSelfClosingTag(tagName)) {
+        eat(endTag);
+      }
       return element;
     }
   }
   function parseAttributeList() {
     const attributes = [];
     skipWhitespace();
-    while (!match('>')) {
+    while (!match(">")) {
       attributes.push(parseAttribute());
       skipWhitespace();
     }
@@ -85,31 +91,34 @@ function parse(content) {
   }
   function parseAttribute() {
     const name = readWhileMatching(/[^=]/);
-    eat('={');
-    const value = parseJavaScript();
-    eat('}');
-    return {
-      type: 'Attribute',
-      name,
-      value,
-    };
+
+    if (match("=")) {
+      eat("={");
+      const value = parseJavaScript();
+      eat("}");
+      return {
+        type: "Attribute",
+        name,
+        value,
+      };
+    }
   }
   function parseExpression() {
-    if (match('{')) {
-      eat('{');
+    if (match("{")) {
+      eat("{");
       const expression = parseJavaScript();
-      eat('}');
+      eat("}");
       return {
-        type: 'Expression',
+        type: "Expression",
         expression,
       };
     }
   }
   function parseText() {
     const text = readWhileMatching(/[^<{]/);
-    if (text.trim() !== '') {
+    if (text.trim() !== "") {
       return {
-        type: 'Text',
+        type: "Text",
         value: text,
       };
     }
@@ -141,6 +150,32 @@ function parse(content) {
   function skipWhitespace() {
     readWhileMatching(/[\s\n]/);
   }
+  // check if self closing tag or not
+
+  function isSelfClosingTag(tagname) {
+    const selfClosingTags = [
+      "area",
+      "base",
+      "br",
+      "col",
+      "command",
+      "embed",
+      "hr",
+      "img",
+      "input",
+      "keygen",
+      "link",
+      "meta",
+      "param",
+      "source",
+      "track",
+      "wbr",
+    ];
+    if (selfClosingTags.includes(tagname)) {
+      return true;
+    }
+  }
+  //end of selfclosing check
 }
 function analyse(ast) {
   const result = {
@@ -157,7 +192,7 @@ function analyse(ast) {
   const reactiveDeclarations = [];
   const toRemove = new Set();
   ast.script.body.forEach((node, index) => {
-    if (node.type === 'LabeledStatement' && node.label.name === '$') {
+    if (node.type === "LabeledStatement" && node.label.name === "$") {
       toRemove.add(node);
       const body = node.body;
       const left = body.expression.left;
@@ -166,7 +201,7 @@ function analyse(ast) {
 
       estreewalker.walk(right, {
         enter(node) {
-          if (node.type === 'Identifier') {
+          if (node.type === "Identifier") {
             dependencies.push(node.name);
           }
         },
@@ -189,11 +224,11 @@ function analyse(ast) {
     enter(node) {
       if (map.has(node)) currentScope = map.get(node);
       if (
-        node.type === 'UpdateExpression' ||
-        node.type === 'AssignmentExpression'
+        node.type === "UpdateExpression" ||
+        node.type === "AssignmentExpression"
       ) {
         const names = periscopic.extract_names(
-          node.type === 'UpdateExpression' ? node.argument : node.left
+          node.type === "UpdateExpression" ? node.argument : node.left
         );
         for (const name of names) {
           if (
@@ -212,14 +247,14 @@ function analyse(ast) {
 
   function traverse(fragment) {
     switch (fragment.type) {
-      case 'Element':
+      case "Element":
         fragment.children.forEach((child) => traverse(child));
         fragment.attributes.forEach((attribute) => traverse(attribute));
         break;
-      case 'Attribute':
+      case "Attribute":
         result.willUseInTemplate.add(fragment.value.name);
         break;
-      case 'Expression': {
+      case "Expression": {
         extract_names(fragment.expression).forEach((name) => {
           result.willUseInTemplate.add(name);
         });
@@ -242,10 +277,10 @@ function generate(ast, analysis) {
 
   let counter = 1;
   let hydration_index = 0;
-  let hydration_parent = 'target';
+  let hydration_parent = "target";
   function traverse(node, parent) {
     switch (node.type) {
-      case 'Element': {
+      case "Element": {
         const variableName = `${node.name}_${counter++}`;
         code.variables.push(variableName);
         code.create.push(
@@ -273,7 +308,7 @@ function generate(ast, analysis) {
         code.destroy.push(`${parent}.removeChild(${variableName})`);
         break;
       }
-      case 'Text': {
+      case "Text": {
         const variableName = `txt_${counter++}`;
         code.variables.push(variableName);
         code.create.push(
@@ -287,8 +322,8 @@ function generate(ast, analysis) {
         );
         break;
       }
-      case 'Attribute': {
-        if (node.name.startsWith('on:')) {
+      case "Attribute": {
+        if (node.name.startsWith("on:")) {
           const eventName = node.name.slice(3);
           const eventHandler = node.value.name;
           code.create.push(
@@ -300,7 +335,7 @@ function generate(ast, analysis) {
         }
         break;
       }
-      case 'Expression': {
+      case "Expression": {
         const variableName = `txt_${counter++}`;
         const expressionStr = escodegen.generate(node.expression);
         code.variables.push(variableName);
@@ -336,7 +371,7 @@ function generate(ast, analysis) {
     }
   }
 
-  ast.html.forEach((fragment) => traverse(fragment, 'target'));
+  ast.html.forEach((fragment) => traverse(fragment, "target"));
 
   const { rootScope, map } = analysis;
   let currentScope = rootScope;
@@ -344,12 +379,12 @@ function generate(ast, analysis) {
     enter(node, parent) {
       if (map.has(node)) currentScope = map.get(node);
       if (
-        node.type === 'UpdateExpression' ||
-        node.type === 'AssignmentExpression'
+        node.type === "UpdateExpression" ||
+        node.type === "AssignmentExpression"
       ) {
         const names = periscopic
           .extract_names(
-            node.type === 'UpdateExpression' ? node.argument : node.left
+            node.type === "UpdateExpression" ? node.argument : node.left
           )
           .filter(
             (name) =>
@@ -358,7 +393,7 @@ function generate(ast, analysis) {
           );
         if (names.length > 0) {
           this.replace({
-            type: 'SequenceExpression',
+            type: "SequenceExpression",
             expressions: [
               node,
               acorn.parseExpressionAt(`update(${JSON.stringify(names)})`, 0, {
@@ -369,15 +404,15 @@ function generate(ast, analysis) {
           this.skip();
         }
       }
-      if (node.type === 'VariableDeclarator' && parent.kind !== 'const') {
+      if (node.type === "VariableDeclarator" && parent.kind !== "const") {
         const name = node.id.name;
         if (currentScope.find_owner(name) === rootScope) {
           this.replace({
-            type: 'VariableDeclarator',
+            type: "VariableDeclarator",
             id: node.id,
             init: {
-              type: 'LogicalExpression',
-              operator: '??',
+              type: "LogicalExpression",
+              operator: "??",
               left: acorn.parseExpressionAt(
                 `restored_state?.${node.id.name}`,
                 0,
@@ -431,7 +466,7 @@ function generate(ast, analysis) {
 
   return `
     export default function({ restored_state } = {}) {
-      ${code.variables.map((v) => `let ${v};`).join('\n')}
+      ${code.variables.map((v) => `let ${v};`).join("\n")}
 
       let collectChanges = [];
       let updateCalled = false;
@@ -453,21 +488,21 @@ function generate(ast, analysis) {
       update(${JSON.stringify(Array.from(analysis.willChange))});
 
       function update_reactive_declarations() {
-        ${code.reactiveDeclarations.join('\n')}
+        ${code.reactiveDeclarations.join("\n")}
       }
 
       var lifecycle = {
         create(target, should_hydrate = target.childNodes.length > 0) {
-          ${code.create.join('\n')}
+          ${code.create.join("\n")}
         },
         update(changed) {
-          ${code.update.join('\n')}
+          ${code.update.join("\n")}
         },
         destroy(target) {
-          ${code.destroy.join('\n')}
+          ${code.destroy.join("\n")}
         },
         capture_state() {
-          return { ${Array.from(analysis.variables).join(',')} };
+          return { ${Array.from(analysis.variables).join(",")} };
         }
       };
       return lifecycle;
@@ -485,41 +520,41 @@ function generateSSR(ast, analysis) {
     },
   };
 
-  let templateString = '';
+  let templateString = "";
   function addString(str) {
     templateString += str;
   }
   function addExpressions(expression) {
     code.template.quasis.push(templateString);
-    templateString = '';
+    templateString = "";
     code.template.expressions.push(expression);
   }
 
   function traverse(node) {
     switch (node.type) {
-      case 'Element': {
+      case "Element": {
         addString(`<${node.name}`);
         node.attributes.forEach((attribute) => {
           traverse(attribute);
         });
-        addString('>');
+        addString(">");
         node.children.forEach((child) => {
           traverse(child);
         });
         addString(`</${node.name}>`);
         break;
       }
-      case 'Text': {
+      case "Text": {
         addString(node.value);
-        addString('<!---->');
+        addString("<!---->");
         break;
       }
-      case 'Attribute': {
+      case "Attribute": {
         break;
       }
-      case 'Expression': {
+      case "Expression": {
         addExpressions(node.expression);
-        addString('<!---->');
+        addString("<!---->");
         break;
       }
     }
@@ -557,10 +592,10 @@ function generateSSR(ast, analysis) {
   );
 
   const templateLiteral = {
-    type: 'TemplateLiteral',
+    type: "TemplateLiteral",
     expressions: code.template.expressions,
     quasis: code.template.quasis.map((str) => ({
-      type: 'TemplateElement',
+      type: "TemplateElement",
       value: {
         raw: str,
         cooked: str,
@@ -570,9 +605,9 @@ function generateSSR(ast, analysis) {
 
   return `
     export default function() {
-      ${code.variables.map((v) => `let ${v};`).join('\n')}
+      ${code.variables.map((v) => `let ${v};`).join("\n")}
       ${escodegen.generate(ast.script)}
-      ${code.reactiveDeclarations.join('\n')}
+      ${code.reactiveDeclarations.join("\n")}
 
       return ${escodegen.generate(templateLiteral)};
     }
@@ -581,10 +616,10 @@ function generateSSR(ast, analysis) {
 
 function extract_names(jsNode, result = []) {
   switch (jsNode.type) {
-    case 'Identifier':
+    case "Identifier":
       result.push(jsNode.name);
       break;
-    case 'BinaryExpression':
+    case "BinaryExpression":
       extract_names(jsNode.left, result);
       extract_names(jsNode.right, result);
       break;
